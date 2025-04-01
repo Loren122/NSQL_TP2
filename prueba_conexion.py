@@ -24,4 +24,23 @@ def listar_capitulos():
         data = json.loads(connection.get(key))
         print(f"Capítulo {num}: {data['titulo']} - Estado: {data['estado']}")
 
+def alquilar_capitulo(num):
+    cap_key = f"capitulo:{num}"
+    cap_data = connection.get(cap_key)
+
+    if not cap_data:
+        print("Capitulo no encontrado")
+        return
+
+    cap_info = json.loads(cap_data)
+    if cap_info["estado"] != "disponible":
+        print("Capitulo no disponible")
+        return
+
+    cap_info["estado"] = "reservado"
+    connection.setex(cap_key, 240, json.dumps(cap_info))
+    print(f"Capítulo {num} reservado por 4 minutos")
+
+alquilar_capitulo(1)
+print("-----------------------")
 listar_capitulos()
