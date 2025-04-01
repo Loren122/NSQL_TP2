@@ -41,6 +41,29 @@ def alquilar_capitulo(num):
     connection.setex(cap_key, 240, json.dumps(cap_info))
     print(f"Capítulo {num} reservado por 4 minutos")
 
+def confirmar_pago(num):
+    cap_key = f"capitulo:{num}"
+    cap_data = connection.get(cap_key)
+
+    if not cap_data:
+        print("Capitulo no encontrado")
+        return
+
+    cap_info = json.loads(cap_data)
+    if cap_info["estado"] != "reservado":
+        print(f"Capitulo {num} no reservado")
+        return
+
+    cap_info["estado"] = "alquilado"
+    connection.setex(cap_key, 86400, json.dumps(cap_info))
+    print(f"Capítulo {num} alquilado por 24 horas")
+
+listar_capitulos()
+print("----------------------------------------------")
 alquilar_capitulo(1)
-print("-----------------------")
+print("----------------------------------------------")
+listar_capitulos()
+print("----------------------------------------------")
+confirmar_pago(2)
+print("----------------------------------------------")
 listar_capitulos()
