@@ -4,7 +4,8 @@ import json
 connection = redis.StrictRedis(
     host="localhost",
     port=6379,
-    db=0
+    db=0,
+    decode_responses=True
 )
 
 capitulos = {
@@ -16,4 +17,11 @@ capitulos = {
 for num, data in capitulos.items():
     connection.set(f"capitulo:{num}", json.dumps(data))
 
-# print(json.loads(connection.get("capitulo:1")))
+def listar_capitulos():
+    keys= connection.keys("capitulo:*")
+    for key in keys:
+        num = key.split(":")[1]
+        data = json.loads(connection.get(key))
+        print(f"Capítulo {num}: {data['titulo']} - Estado: {data['estado']}")
+
+listar_capitulos()
