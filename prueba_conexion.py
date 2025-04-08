@@ -1,6 +1,9 @@
+from flask import Flask, render_template, redirect, url_for, jsonify
+from datetime import datetime, timedelta
 import redis
 import json
 
+app = Flask(__name__)
 connection = redis.StrictRedis(
     host="localhost",
     port=6379,
@@ -11,80 +14,121 @@ connection = redis.StrictRedis(
 capitulos = {
     "1": {"titulo": "El Mandaloriano", "estado": "disponible", "precio": 10},
     "2": {"titulo": "El Niño", "estado": "disponible", "precio": 12},
-    "3": {"titulo": "El Pecado", "estado": "disponible", "precio": 15}
+    "3": {"titulo": "El Pecado", "estado": "disponible", "precio": 15},
+    "4": {"titulo": "El Santuario", "estado": "disponible", "precio": 11},
+    "5": {"titulo": "El Pistolero", "estado": "disponible", "precio": 13},
+    "6": {"titulo": "El Prisionero", "estado": "disponible", "precio": 12},
+    "7": {"titulo": "La Cuenta Atrás", "estado": "disponible", "precio": 14},
+    "8": {"titulo": "Redención", "estado": "disponible", "precio": 15},
+    "9": {"titulo": "El Asedio", "estado": "disponible", "precio": 13},
+    "10": {"titulo": "La Jedi", "estado": "disponible", "precio": 16},
+    "11": {"titulo": "El Creyente", "estado": "disponible", "precio": 14},
+    "12": {"titulo": "El Rescate", "estado": "disponible", "precio": 17},
+    "13": {"titulo": "El Expulsado", "estado": "disponible", "precio": 12},
+    "14": {"titulo": "El Apostata", "estado": "disponible", "precio": 14},
+    "15": {"titulo": "El Minero", "estado": "disponible", "precio": 13},
+    "16": {"titulo": "El Heredero", "estado": "disponible", "precio": 16},
+    "17": {"titulo": "La Fortaleza", "estado": "disponible", "precio": 15},
+    "18": {"titulo": "Sombras del Pasado", "estado": "disponible", "precio": 14},
+    "19": {"titulo": "El Camino", "estado": "disponible", "precio": 13},
+    "20": {"titulo": "Destino", "estado": "disponible", "precio": 17}
 }
 
 for num, data in capitulos.items():
-    connection.set(f"capitulo:{num}", json.dumps(data))
+    if not connection.exists(f"capitulo:{num}"):
+        connection.set(f"capitulo:{num}", json.dumps(data))
 
-connection.set("usuario:saldo", 30)
+if not connection.exists("usuario:saldo"):
+    connection.set("usuario:saldo", 30)
 
-def listar_capitulos():
-    keys= connection.keys("capitulo:*")
+@app.route("/")
+def home():
+    keys = connection.keys("capitulo:*")
+    lista = []
     for key in keys:
         num = key.split(":")[1]
-        cap_data = connection.get(key)
-        cap_info = json.loads(cap_data)
+        data = json.loads(connection.get(key))
 
-        if cap_info["estado"] == "alquilado" and not connection.exists(f"alquiler:{num}"):
-            cap_info["estado"] = "disponible"
+        if data["estado"] == "alquilado" and not connection.exists(f"alquiler:{num}"):
+            data["estado"] = "disponible"
+            data.pop("expira", None)
+            connection.set(key, json.dumps(data))
 
-        print(f"Capítulo {num}: {cap_info['titulo']} - Estado: {cap_info['estado']} - Precio: {cap_info['precio']}")
+        if data["estado"] == "reservado" and not connection.exists(f"reserva:{num}"):
+            data["estado"] = "disponible"
+            data.pop("expira", None)
+            connection.set(key, json.dumps(data))
 
-def alquilar_capitulo(num):
-    cap_key = f"capitulo:{num}"
-    cap_data = connection.get(cap_key)
-
-    if not cap_data:
-        print("Capitulo no encontrado")
-        return
-
-    cap_info = json.loads(cap_data)
-    if cap_info["estado"] != "disponible":
-        print("Capitulo no disponible")
-        return
-
-    cap_info["estado"] = "reservado"
-    connection.set(cap_key, json.dumps(cap_info))
-    connection.setex(f"reserva:{num}", 240, "pendiente")
-    print(f"Capítulo {num} reservado por 4 minutos")
-
-def confirmar_pago(num):
-    cap_key = f"capitulo:{num}"
-    cap_data = connection.get(cap_key)
-
-    if not cap_data:
-        print("Capitulo no encontrado")
-        return
-
-    cap_info = json.loads(cap_data)
-
-    if cap_info["estado"] != "reservado":
-        print(f"Capitulo {num} no reservado")
-        return
+        lista.append({"num": num, **data})
 
     saldo = int(connection.get("usuario:saldo"))
-    precio = int(cap_info["precio"])
+    return render_template("index.html", capitulos=list, saldo=saldo)
+
+@app.route("/reservar/<num>")
+def reservar(num):
+    key = f"capitulo:{num}"
+    data = json.loads(connection.get(key))
+
+    if data["estado"] == "disponible":
+        data["estado"] = "reservado"
+        expira_en = datetime.utcnow() + timedelta(seconds=240)
+        data["expira"] = expira_en.timestamp()
+        connection.set(key, json.dumps(data))
+        connection.setex(f"reserva:{num}", 240, "pendiente")
+
+    return redirect(url_for("home"))
+
+@app.route("/pagar/<num>")
+def pagar(num):
+    key = f"capitulo:{num}"
+    data = json.loads(connection.get(key))
+
+    if data["estado"] != "reservado":
+        return redirect(url_for("home"))
+
+    saldo = int(connection.get("usuario:saldo"))
+    precio = data["precio"]
 
     if saldo < precio:
-        print("Saldo insuficiente")
-        return
+        return jsonify({"error": "Saldo insuficiente"}), 400
 
-    nuevo_saldo = saldo - precio
-    connection.set("usuario:saldo", nuevo_saldo)
+    saldo -= precio
+    connection.set("usuario:saldo", saldo)
 
-    cap_info["estado"] = "alquilado"
-    connection.set(cap_key, json.dumps(cap_info))
+    data["estado"] = "alquilado"
+    expira_en = datetime.utcnow() + timedelta(seconds=86400)
+    data["expira"] = expira_en.timestamp()
+    connection.set(key, json.dumps(data))
     connection.setex(f"alquiler:{num}", 86400, "activo")
     connection.delete(f"reserva:{num}")
-    print(f"Capítulo {num} alquilado por 24 horas. Saldo restante: ${nuevo_saldo}")
 
-listar_capitulos()
-print("----------------------------------------------")
-alquilar_capitulo(1)
-print("----------------------------------------------")
-listar_capitulos()
-print("----------------------------------------------")
-confirmar_pago(1)
-print("----------------------------------------------")
-listar_capitulos()
+    return redirect(url_for("home"))
+
+@app.route("/capitulos")
+def obtener_capitulos():
+    keys = connection.keys("capitulo:*")
+    lista = []
+
+    for key in keys:
+        num = key.split(":")[1]
+        data = json.loads(connection.get(key))
+
+        if data["estado"] == "alquilado" and not connection.exists(f"alquiler:{num}"):
+            data["estado"] = "disponible"
+            connection.set(key, json.dumps(data))
+
+        lista.append({"num": num, **data})
+
+    saldo = int(connection.get("usuario:saldo"))
+    return jsonify({"capitulos": lista, "saldo": saldo})
+
+@app.route("/recargar/<int:monto>")
+def recargar(monto):
+    saldo = int(connection.get("usuario:saldo"))
+    saldo += monto
+    connection.set("usuario:saldo", saldo)
+    return "", 204
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
